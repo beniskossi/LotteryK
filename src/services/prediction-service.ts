@@ -1,8 +1,8 @@
 'use server';
 /**
- * @fileOverview Provides algorithmic prediction for lottery numbers.
+ * @fileOverview Provides algorithmic prediction for lottery numbers, incorporating past error analysis.
  *
- * - predictNextDrawAlgorithm - Predicts the next draw based on historical data.
+ * - predictNextDrawAlgorithm - Predicts the next draw based on historical data and recent error analysis.
  * - AlgorithmInput - Input type for the prediction algorithm.
  * - AlgorithmOutput - Output type for the prediction algorithm.
  * - HistoricalDataPoint - Represents a single historical draw.
@@ -13,7 +13,7 @@ import type { LotteryCategory, HistoricalDataPoint } from '@/types/lottery';
 // Input type remains similar to the AI flow, but without Zod for server-side logic simplicity here.
 export interface AlgorithmInput {
   category: LotteryCategory;
-  historicalData: HistoricalDataPoint[];
+  historicalData: HistoricalDataPoint[]; // Expects data sorted chronologically ASCENDING
 }
 
 // Output type also remains similar.
@@ -22,95 +22,131 @@ export interface AlgorithmOutput {
     number: number;
     confidence: number; // Represents calculated score/probability (0-1)
   }[];
+  analysisPerformed: boolean; // Flag indicating if error analysis was done
 }
 
 const MAX_NUMBER = 90;
 const PREDICTION_COUNT = 5;
-const RECENCY_WEIGHT = 0.4;
-const FREQUENCY_WEIGHT = 0.6;
-// More advanced: Consider pair/triplet analysis, hot/cold streaks, etc.
+const BASE_RECENCY_WEIGHT = 0.4;
+const BASE_FREQUENCY_WEIGHT = 0.6;
+// Error Adjustment Factors (small values to avoid drastic swings)
+const ERROR_PENALTY_FACTOR = 0.05; // Reduce score by 5% for each recent miss
+const ERROR_BOOST_FACTOR = 0.03;   // Increase score by 3% for each recent unexpected hit
+const MIN_DRAWS_FOR_BASIC_PREDICTION = 10;
+const MIN_DRAWS_FOR_ERROR_ANALYSIS = 11; // Need n-1 for prediction + 1 for actual outcome
+
+/**
+ * Calculates scores based on frequency and recency.
+ */
+function calculateBaseScores(data: HistoricalDataPoint[]): Record<number, number> {
+    const scores: Record<number, number> = {};
+    const frequency: Record<number, number> = {};
+    const lastSeen: Record<number, number> = {}; // Draw index from present (0 = most recent in this subset)
+    const totalDraws = data.length;
+
+    for (let i = 1; i <= MAX_NUMBER; i++) {
+        scores[i] = 0;
+        frequency[i] = 0;
+        lastSeen[i] = totalDraws; // Assume not seen initially in this subset
+    }
+
+    data.forEach((draw, index) => {
+        const drawIndexFromPresent = index; // 0 is the most recent in this specific dataset
+        draw.numbers.forEach(num => {
+            frequency[num]++;
+            if (lastSeen[num] === totalDraws) {
+                lastSeen[num] = drawIndexFromPresent;
+            }
+        });
+    });
+
+    let maxFrequency = 0;
+    for (let i = 1; i <= MAX_NUMBER; i++) {
+       if(frequency[i] > maxFrequency) maxFrequency = frequency[i];
+    }
+
+    for (let i = 1; i <= MAX_NUMBER; i++) {
+        const normalizedFrequency = maxFrequency > 0 ? frequency[i] / maxFrequency : 0;
+        const normalizedRecency = lastSeen[i] < totalDraws ? 1 - (lastSeen[i] / totalDraws) : 0;
+        scores[i] = (normalizedFrequency * BASE_FREQUENCY_WEIGHT) + (normalizedRecency * BASE_RECENCY_WEIGHT);
+
+         // Simple Boost/Penalty (based on general recency within this subset)
+        if (lastSeen[i] < 5) {
+          scores[i] *= 1.05; // 5% boost for very recent
+        } else if (lastSeen[i] > totalDraws / 2 && totalDraws > 10) { // Only apply penalty if enough data
+           scores[i] *= 0.95; // 5% penalty for not appearing recently
+        }
+    }
+
+    return scores;
+}
 
 /**
  * Predicts the next lottery draw numbers based on an improved algorithm analyzing historical data.
- * Combines frequency and recency analysis.
- * @param input - The historical data and category.
- * @returns The predicted numbers with confidence scores.
+ * Combines frequency and recency analysis, and incorporates analysis of the most recent prediction error.
+ * @param input - The historical data (sorted ASC) and category.
+ * @returns The predicted numbers with confidence scores and an analysis flag.
  */
 export async function predictNextDrawAlgorithm(input: AlgorithmInput): Promise<AlgorithmOutput> {
   const { historicalData } = input;
   const totalDraws = historicalData.length;
+  let analysisPerformed = false;
 
-  if (totalDraws < 10) {
-    // Not enough data for a meaningful prediction
-    // Return empty or a default state? For now, return empty with a console warning.
-    console.warn(`Insufficient data for prediction in category ${input.category}. Needs at least 10 draws, got ${totalDraws}.`);
-     return { predictions: [] }; // Or throw an error to be caught by the caller
-     // Let's return empty for now, the UI handles this message already.
+  if (totalDraws < MIN_DRAWS_FOR_BASIC_PREDICTION) {
+    console.warn(`Insufficient data for basic prediction in category ${input.category}. Needs ${MIN_DRAWS_FOR_BASIC_PREDICTION} draws, got ${totalDraws}.`);
+     return { predictions: [], analysisPerformed };
   }
 
-  const scores: Record<number, number> = {};
-  const frequency: Record<number, number> = {};
-  const lastSeen: Record<number, number> = {}; // Draw index where number was last seen (0 = most recent)
+  // Calculate initial scores based on ALL available data
+  const currentScores = calculateBaseScores(historicalData);
 
-  // Initialize scores, frequency, and lastSeen
-  for (let i = 1; i <= MAX_NUMBER; i++) {
-    scores[i] = 0;
-    frequency[i] = 0;
-    lastSeen[i] = totalDraws; // Assume initially not seen in the provided data
+  // --- Error Analysis Step (If enough data) ---
+  if (totalDraws >= MIN_DRAWS_FOR_ERROR_ANALYSIS) {
+    analysisPerformed = true;
+    const mostRecentDraw = historicalData[totalDraws - 1]; // Last element is most recent
+    const previousDraws = historicalData.slice(0, totalDraws - 1); // All except the last
+
+    // Calculate what the prediction *would have been* for the most recent draw
+    const retrospectiveScores = calculateBaseScores(previousDraws);
+
+    // Get top 5 retrospective predictions
+    const retrospectivePredictions = Object.entries(retrospectiveScores)
+      .map(([num, score]) => ({ number: parseInt(num), score }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, PREDICTION_COUNT)
+      .map(p => p.number);
+
+    const actualNumbers = new Set(mostRecentDraw.numbers);
+
+    // Apply adjustments to CURRENT scores based on retrospective error
+    for (let i = 1; i <= MAX_NUMBER; i++) {
+        const wasPredictedRetrospectively = retrospectivePredictions.includes(i);
+        const didAppear = actualNumbers.has(i);
+
+        if (wasPredictedRetrospectively && !didAppear) {
+            // Predicted but missed: Apply penalty
+            currentScores[i] *= (1 - ERROR_PENALTY_FACTOR);
+        } else if (!wasPredictedRetrospectively && didAppear) {
+            // Appeared unexpectedly: Apply boost
+             currentScores[i] *= (1 + ERROR_BOOST_FACTOR);
+        }
+        // Ensure score doesn't go negative (unlikely but possible with penalties)
+         if (currentScores[i] < 0) currentScores[i] = 0;
+    }
   }
-
-  // Process historical data (assuming already sorted chronologically ASCENDING for recency)
-  // The hook provides data sorted DESCENDING, so we reverse it or iterate backwards.
-  // Let's iterate backwards for simplicity here.
-  historicalData.forEach((draw, index) => {
-    const drawIndexFromPresent = index; // 0 is the most recent draw
-    draw.numbers.forEach(num => {
-      frequency[num]++;
-      if (lastSeen[num] === totalDraws) { // Only update if this is the first time seeing it (most recent)
-         lastSeen[num] = drawIndexFromPresent;
-      }
-    });
-  });
-
-  // Calculate scores
-  let maxFrequency = 0;
-  for (let i = 1; i <= MAX_NUMBER; i++) {
-     if(frequency[i] > maxFrequency) maxFrequency = frequency[i];
-  }
+   // --- End Error Analysis Step ---
 
 
-  for (let i = 1; i <= MAX_NUMBER; i++) {
-    // Normalize frequency (0-1)
-    const normalizedFrequency = maxFrequency > 0 ? frequency[i] / maxFrequency : 0;
-
-    // Normalize recency (0-1, where 1 is most recent)
-    // Lower lastSeen index means more recent.
-    const normalizedRecency = lastSeen[i] < totalDraws ? 1 - (lastSeen[i] / totalDraws) : 0;
-
-    // Combine scores with weights
-    scores[i] = (normalizedFrequency * FREQUENCY_WEIGHT) + (normalizedRecency * RECENCY_WEIGHT);
-
-    // Simple Boost/Penalty (Example): Boost numbers that appeared in the last 5 draws slightly
-     if (lastSeen[i] < 5) {
-       scores[i] *= 1.1; // 10% boost
-     }
-     // Simple Penalty: Penalize numbers that haven't appeared in the last 50% of draws
-     else if (lastSeen[i] > totalDraws / 2) {
-        scores[i] *= 0.9; // 10% penalty
-     }
-  }
-
-   // Find max score for final normalization
+   // Normalize adjusted scores and prepare final predictions
    let maxScore = 0;
-   Object.values(scores).forEach(score => {
+   Object.values(currentScores).forEach(score => {
      if (score > maxScore) maxScore = score;
    });
 
 
-  // Prepare predictions
-  const sortedScores = Object.entries(scores)
+  const sortedScores = Object.entries(currentScores)
     .map(([num, score]) => ({ number: parseInt(num), score: score }))
-    .sort((a, b) => b.score - a.score); // Sort descending by score
+    .sort((a, b) => b.score - a.score); // Sort descending by adjusted score
 
   const predictions = sortedScores.slice(0, PREDICTION_COUNT).map(item => ({
     number: item.number,
@@ -118,18 +154,16 @@ export async function predictNextDrawAlgorithm(input: AlgorithmInput): Promise<A
     confidence: maxScore > 0 ? Math.min(1, item.score / maxScore) : 0, // Ensure confidence doesn't exceed 1
   }));
 
-   // Ensure 5 predictions, even if scores are low/zero, padding if necessary
+   // Ensure 5 predictions, padding if necessary
    while (predictions.length < PREDICTION_COUNT && predictions.length < MAX_NUMBER) {
-       // Find the next number from sortedScores not already in predictions
-       const nextBest = sortedScores.find(s => !predictions.some(p => p.number === s.number));
+       const nextBest = sortedScores.find(s => !predictions.some(p => p.number === s.number && s.number !== undefined));
        if (nextBest) {
            predictions.push({
                number: nextBest.number,
                confidence: maxScore > 0 ? Math.min(1, nextBest.score / maxScore) : 0,
            });
        } else {
-           // Should not happen if MAX_NUMBER >= PREDICTION_COUNT
-           break;
+           break; // Should not happen if MAX_NUMBER >= PREDICTION_COUNT
        }
    }
 
@@ -138,5 +172,5 @@ export async function predictNextDrawAlgorithm(input: AlgorithmInput): Promise<A
    predictions.sort((a, b) => b.confidence - a.confidence);
 
 
-  return { predictions };
+  return { predictions, analysisPerformed };
 }

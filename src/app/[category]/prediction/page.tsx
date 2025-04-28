@@ -2,11 +2,10 @@
 
 import type { LotteryCategory, HistoricalDataPoint } from '@/types/lottery';
 import { useLotteryData } from '@/hooks/useLotteryData';
-import { useState, useEffect, useCallback, use } from 'react'; // Added use
+import { useState, useEffect, useCallback, use } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BrainCircuit, Loader2 } from 'lucide-react';
-// Import the new algorithmic prediction service
 import { predictNextDrawAlgorithm, AlgorithmInput, AlgorithmOutput } from '@/services/prediction-service';
 import { getBallColorClass } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,74 +13,77 @@ import { Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface PredictionPageProps {
-  // params is now a Promise
   params: Promise<{ category: string }>;
 }
 
+const MIN_DRAWS_REQUIRED = 10; // Minimum for basic prediction
+
 export default function PredictionPage({ params }: PredictionPageProps) {
-  // Unwrap the params Promise using React.use()
   const resolvedParams = use(params);
   const category = resolvedParams.category as LotteryCategory;
   const { draws, loading: dataLoading } = useLotteryData(category);
-  // Update state type to use AlgorithmOutput
   const [prediction, setPrediction] = useState<AlgorithmOutput | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [analysisPerformed, setAnalysisPerformed] = useState(false);
 
   const handlePredict = useCallback(async () => {
-    if (draws.length < 10) { // Require minimum data for prediction
-        setError('Données historiques insuffisantes pour générer une prédiction fiable (minimum 10 tirages requis).');
-        setPrediction(null);
-        return;
+    if (draws.length < MIN_DRAWS_REQUIRED) {
+      setError(`Données historiques insuffisantes. Au moins ${MIN_DRAWS_REQUIRED} tirages sont requis.`);
+      setPrediction(null);
+      setAnalysisPerformed(false);
+      return;
     }
 
     setIsLoading(true);
     setError(null);
-    setPrediction(null); // Clear previous prediction
+    setPrediction(null);
+    setAnalysisPerformed(false);
 
     try {
-      // Prepare historical data - needs to be sorted ASCENDING for the algorithm's recency logic
-      const historicalData: HistoricalDataPoint[] = [...draws] // Create a copy before sorting
+      // Prepare historical data, SORTED ASCENDING (oldest first) as required by the updated algorithm
+      const historicalData: HistoricalDataPoint[] = [...draws]
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) // Sort chronological order ASC
         .map(draw => ({
           date: draw.date,
           numbers: draw.numbers,
         }));
 
-      // Update input type
       const input: AlgorithmInput = {
         category: category,
         historicalData: historicalData,
       };
 
-      // Call the new algorithm service
       const result = await predictNextDrawAlgorithm(input);
 
-      // The algorithm already sorts by confidence, but we can ensure it here too
-      if(result.predictions.length > 0) {
-         result.predictions.sort((a, b) => b.confidence - a.confidence);
-      } else if (draws.length >= 10) {
-        // If the algorithm returns empty despite enough data, it's likely an internal issue or edge case
-         console.warn("Prediction algorithm returned empty results despite sufficient data.");
-         setError("La prédiction n'a pas pu générer de résultats. Réessayez ou vérifiez les données.");
+      if (result.predictions.length > 0) {
+        // Algorithm already sorts, but ensure it
+        result.predictions.sort((a, b) => b.confidence - a.confidence);
+        setPrediction(result);
+        setAnalysisPerformed(result.analysisPerformed); // Store analysis status
+      } else if (draws.length >= MIN_DRAWS_REQUIRED) {
+        console.warn("Prediction algorithm returned empty results despite sufficient data.");
+        setError("La prédiction n'a pas pu générer de résultats. Vérifiez les données ou réessayez.");
+        setPrediction(null);
+        setAnalysisPerformed(false);
       }
-      setPrediction(result);
 
     } catch (err) {
       console.error('Prediction failed:', err);
       setError('La prédiction a échoué. Veuillez réessayer.');
-       setPrediction(null);
+      setPrediction(null);
+      setAnalysisPerformed(false);
     } finally {
       setIsLoading(false);
     }
   }, [draws, category]);
 
-  // Automatic trigger logic remains the same
-  useEffect(() => {
-    if (!dataLoading && draws.length >= 10 && !prediction && !error && !isLoading) {
-     // handlePredict(); // Optional: auto-predict on load if desired
-    }
-  }, [dataLoading, draws.length, prediction, error, isLoading, handlePredict]);
+  // Optional: Auto-predict on load if desired
+  // useEffect(() => {
+  //   if (!dataLoading && draws.length >= MIN_DRAWS_REQUIRED && !prediction && !error && !isLoading) {
+  //     handlePredict();
+  //   }
+  // }, [dataLoading, draws.length, prediction, error, isLoading, handlePredict]);
 
 
    if (dataLoading) {
@@ -105,26 +107,26 @@ export default function PredictionPage({ params }: PredictionPageProps) {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold text-foreground">Prédiction du Prochain Tirage (Algorithme)</h2>
+      <h2 className="text-2xl font-semibold text-foreground">Prédiction du Prochain Tirage</h2>
 
-        <Button onClick={handlePredict} disabled={isLoading || draws.length < 10} className="w-full max-w-xs mx-auto flex items-center justify-center">
-            {isLoading ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-            <BrainCircuit className="mr-2 h-4 w-4" /> /* Keeping BrainCircuit icon for now */
-            )}
-            {isLoading ? 'Prédiction en cours...' : 'Prédire le prochain tirage'}
-        </Button>
-
-        {draws.length < 10 && !dataLoading && (
-             <Alert variant="destructive">
-                <Info className="h-4 w-4" />
-                <AlertTitle>Données Insuffisantes</AlertTitle>
-                <AlertDescription>
-                 Il faut au moins 10 tirages enregistrés pour générer une prédiction. Actuellement: {draws.length}.
-                </AlertDescription>
-            </Alert>
+      <Button onClick={handlePredict} disabled={isLoading || draws.length < MIN_DRAWS_REQUIRED} className="w-full max-w-xs mx-auto flex items-center justify-center">
+        {isLoading ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <BrainCircuit className="mr-2 h-4 w-4" />
         )}
+        {isLoading ? 'Prédiction en cours...' : 'Prédire le prochain tirage'}
+      </Button>
+
+      {draws.length < MIN_DRAWS_REQUIRED && !dataLoading && (
+        <Alert variant="destructive">
+          <Info className="h-4 w-4" />
+          <AlertTitle>Données Insuffisantes</AlertTitle>
+          <AlertDescription>
+           Il faut au moins {MIN_DRAWS_REQUIRED} tirages enregistrés pour générer une prédiction. Actuellement: {draws.length}.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -134,14 +136,16 @@ export default function PredictionPage({ params }: PredictionPageProps) {
         </Alert>
       )}
 
-      {/* Check prediction and prediction.predictions as it can be empty now */}
       {prediction && prediction.predictions && prediction.predictions.length > 0 && (
         <Card className="shadow-lg text-center">
           <CardHeader>
             <CardTitle className="text-xl">Numéros Probables pour {category}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-             <p className="text-sm text-muted-foreground">Basé sur l'analyse algorithmique des données historiques.</p>
+             <p className="text-sm text-muted-foreground">
+                Basé sur l'analyse algorithmique des données historiques
+                {analysisPerformed ? " et l'analyse de l'erreur récente." : "."}
+             </p>
             <div className="flex justify-center space-x-2 sm:space-x-4">
               {prediction.predictions.map(({ number, confidence }, index) => (
                 <div key={index} className="flex flex-col items-center">
@@ -151,7 +155,7 @@ export default function PredictionPage({ params }: PredictionPageProps) {
                     {number}
                   </span>
                   <span className="mt-2 text-xs text-muted-foreground">
-                    Score: {(confidence * 100).toFixed(0)}% {/* Changed label from Confiance to Score */}
+                    Score: {(confidence * 100).toFixed(0)}%
                   </span>
                 </div>
               ))}
@@ -163,13 +167,13 @@ export default function PredictionPage({ params }: PredictionPageProps) {
         </Card>
       )}
 
-       {/* Updated condition for the "Ready" alert */}
-       {!prediction?.predictions?.length && !error && draws.length >= 10 && !isLoading && (
+       {/* Show ready message */}
+       {!prediction?.predictions?.length && !error && draws.length >= MIN_DRAWS_REQUIRED && !isLoading && (
             <Alert variant="default" className="mt-6">
                 <Info className="h-4 w-4" />
                 <AlertTitle>Prêt pour la Prédiction</AlertTitle>
                 <AlertDescription>
-                Cliquez sur le bouton ci-dessus pour générer une prédiction basée sur les {draws.length} tirages enregistrés pour la catégorie {category}, en utilisant un algorithme amélioré.
+                 Cliquez sur le bouton ci-dessus pour générer une prédiction basée sur les {draws.length} tirages enregistrés pour {category}. L'algorithme utilise l'analyse de fréquence, de récence {draws.length >= 11 ? "et de l'erreur de la prédiction précédente." : "."}
                 </AlertDescription>
             </Alert>
        )}

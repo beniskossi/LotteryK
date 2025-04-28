@@ -177,7 +177,7 @@ export default function StatisticsPage({ params }: StatisticsPageProps) {
                             tickLine={false}
                             axisLine={false}
                             tickMargin={10}
-                            width={30} // Ensure enough space for numbers
+                            width={40} // Increased width to ensure label visibility
                             tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
 
                           />
@@ -267,7 +267,7 @@ export default function StatisticsPage({ params }: StatisticsPageProps) {
                       </span>
                     </TableCell>
                     <TableCell className="font-medium">{frequency}</TableCell>
-                     <TableCell className="text-right">{((frequency / draws.length) * 100).toFixed(1)}%</TableCell>
+                     <TableCell className="text-right">{draws.length > 0 ? ((frequency / draws.length) * 100).toFixed(1) + '%' : '0.0%'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

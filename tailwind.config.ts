@@ -1,4 +1,6 @@
 import type { Config } from "tailwindcss";
+import colors from 'tailwindcss/colors'; // Import default colors
+
 
 export default {
     darkMode: ["class"],
@@ -9,6 +11,19 @@ export default {
   ],
   theme: {
   	extend: {
+      // Safelist ball colors to ensure they are generated
+       safelist: [
+        'bg-red-600',
+        'bg-blue-600',
+        'bg-green-600',
+        'bg-yellow-500',
+        'bg-purple-600',
+        'bg-orange-500',
+        'bg-cyan-500',
+        'bg-pink-500',
+        'bg-gray-500',
+        'bg-gray-400', // Fallback
+      ],
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -50,16 +65,19 @@ export default {
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
   			},
-  			sidebar: {
-  				DEFAULT: 'hsl(var(--sidebar-background))',
-  				foreground: 'hsl(var(--sidebar-foreground))',
-  				primary: 'hsl(var(--sidebar-primary))',
-  				'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
-  				accent: 'hsl(var(--sidebar-accent))',
-  				'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
-  				border: 'hsl(var(--sidebar-border))',
-  				ring: 'hsl(var(--sidebar-ring))'
-  			}
+           // Add specific ball colors for utility usage if needed directly
+           // These might not be strictly necessary if using getBallColorClass utility
+           ball: {
+                red: colors.red[600],
+                blue: colors.blue[600],
+                green: colors.green[600],
+                yellow: colors.yellow[500],
+                purple: colors.purple[600],
+                orange: colors.orange[500],
+                cyan: colors.cyan[500],
+                pink: colors.pink[500],
+                gray: colors.gray[500],
+           }
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

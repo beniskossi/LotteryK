@@ -17,7 +17,7 @@ import { Calendar as CalendarIcon, PlusCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from '@/hooks/use-toast';
 import NumericKeypad from '@/components/numeric-keypad';
-import { useState } from 'react';
+import { useState, useRef } from 'react'; // Import useRef
 
 
 interface DrawEntryFormProps {
@@ -33,13 +33,23 @@ const DrawSchema = z.object({
     .length(5, "Veuillez entrer 5 numéros.")
     .refine(
       (nums) => nums.every(numStr => {
+        // Allow empty strings during input, but final validation requires numbers
+        if (numStr === '') return true;
         const num = parseInt(numStr, 10);
         return !isNaN(num) && num >= 1 && num <= 90;
       }),
       "Chaque numéro doit être entre 1 et 90."
     )
     .refine(
-      (nums) => new Set(nums.map(n => parseInt(n, 10))).size === nums.length,
+        (nums) => nums.every(numStr => numStr !== ''), // Ensure all fields are filled before final submit validation
+        "Veuillez entrer 5 numéros."
+    )
+    .refine(
+      (nums) => {
+         // Filter out empty strings before checking for duplicates
+         const filledNums = nums.filter(n => n !== '').map(n => parseInt(n, 10));
+         return new Set(filledNums).size === filledNums.length;
+      },
       "Les numéros ne doivent pas être dupliqués."
     ),
 });
@@ -49,8 +59,10 @@ type DrawFormData = z.infer<typeof DrawSchema>;
 export default function DrawEntryForm({ category }: DrawEntryFormProps) {
   const { addDraw } = useLotteryData(category);
   const { toast } = useToast();
-  const [activeInputIndex, setActiveInputIndex] = useState<number | null>(null);
+  const [activeInputIndex, setActiveInputIndex] = useState<number | null>(0); // Start focus on the first input
   const [isCalendarOpen, setIsCalendarOpen] = useState(false); // State for Calendar Popover
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]); // Ref for input elements
+
 
    const form = useForm<DrawFormData>({
      resolver: zodResolver(DrawSchema),
@@ -58,12 +70,26 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
        date: new Date(),
        numbers: Array(5).fill(''),
      },
+     mode: 'onChange', // Validate on change to give feedback
    });
 
   const onSubmit = (data: DrawFormData) => {
+    // Additional check just before submission, although schema should handle it
+     const filledNumbers = data.numbers.map(n => n.trim()).filter(n => n !== '');
+     if (filledNumbers.length !== 5) {
+       form.setError('numbers', { type: 'manual', message: 'Veuillez entrer 5 numéros.' });
+       // Find the first empty input and focus it
+       const firstEmptyIndex = data.numbers.findIndex(n => n.trim() === '');
+       if (firstEmptyIndex !== -1) {
+            inputRefs.current[firstEmptyIndex]?.focus();
+            setActiveInputIndex(firstEmptyIndex); // Ensure keypad targets correct input
+       }
+       return;
+     }
+
     const drawData: Omit<LotteryDraw, 'id'> = {
       date: format(data.date, 'yyyy-MM-dd'),
-      numbers: data.numbers.map(Number),
+      numbers: data.numbers.map(Number), // Convert valid strings to numbers
     };
     addDraw(drawData);
     toast({
@@ -72,7 +98,8 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
       variant: "default",
     });
     form.reset({ date: new Date(), numbers: Array(5).fill('') }); // Reset form after submission
-    setActiveInputIndex(null); // Close keypad
+    inputRefs.current[0]?.focus(); // Focus first input after reset
+    setActiveInputIndex(0);
     setIsCalendarOpen(false); // Ensure calendar is closed on submit
   };
 
@@ -81,38 +108,81 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
 
     const currentNumbers = form.getValues('numbers');
     const newNumbers = [...currentNumbers];
+    const currentIndex = activeInputIndex;
 
     if (value === 'delete') {
-        // If current input is empty, move to previous and delete
-        if (newNumbers[activeInputIndex] === '' && activeInputIndex > 0) {
-            newNumbers[activeInputIndex - 1] = '';
-            form.setValue('numbers', newNumbers, { shouldValidate: true });
-            setActiveInputIndex(activeInputIndex - 1);
-        } else {
-            newNumbers[activeInputIndex] = '';
-            form.setValue('numbers', newNumbers, { shouldValidate: true });
+      const currentVal = newNumbers[currentIndex];
+      if (currentVal.length > 0) {
+        // Delete the last digit of the current input
+        newNumbers[currentIndex] = currentVal.slice(0, -1);
+        form.setValue('numbers', newNumbers, { shouldValidate: true });
+        inputRefs.current[currentIndex]?.focus(); // Keep focus
+      } else if (currentIndex > 0) {
+        // Current input is empty, move focus to the previous input and delete its last digit
+        const prevIndex = currentIndex - 1;
+        newNumbers[prevIndex] = newNumbers[prevIndex].slice(0, -1);
+        form.setValue('numbers', newNumbers, { shouldValidate: true });
+        inputRefs.current[prevIndex]?.focus(); // Focus previous input
+        setActiveInputIndex(prevIndex); // Update active index for keypad
+      }
+    } else { // Handle number input
+      const currentVal = newNumbers[currentIndex];
+      let nextVal = currentVal + value;
+
+      // Ensure the number is valid (1-90) and handle leading zeros or invalid combinations
+      if (nextVal.length === 1 && nextVal === '0') {
+        nextVal = ''; // Prevent leading zero
+      } else if (nextVal.length > 0) {
+         const num = parseInt(nextVal, 10);
+         if (isNaN(num) || num < 1 || num > 90) {
+            // If the new value is invalid (e.g., > 90), don't update
+            nextVal = currentVal; // Revert to previous value
+            // Optionally provide feedback (e.g., shake animation or border color)
+             toast({
+                title: "Invalide",
+                description: "Le numéro doit être entre 1 et 90.",
+                variant: "destructive",
+             });
+             return; // Stop processing this input
+         }
+      }
+
+
+      // Only allow up to 2 digits
+      if (nextVal.length <= 2) {
+        newNumbers[currentIndex] = nextVal;
+        form.setValue('numbers', newNumbers, { shouldValidate: true });
+
+        // Move to the next input if 2 digits are entered or if '0' was handled
+        if (nextVal.length === 2 && currentIndex < 4) {
+          const nextIndex = currentIndex + 1;
+          inputRefs.current[nextIndex]?.focus();
+          setActiveInputIndex(nextIndex);
+        } else if (nextVal.length === 2 && currentIndex === 4) {
+            // Last input filled, optionally close keypad or focus submit
+            setActiveInputIndex(null); // Hide keypad
+        } else if (nextVal.length === 1 && currentIndex < 4 && parseInt(nextVal, 10) >= 10) {
+            // This case shouldn't happen with the validation above, but as fallback:
+            // If a single digit makes it >= 10 (e.g. user typed '9' then '1'), move next
+           // const nextIndex = currentIndex + 1;
+           // inputRefs.current[nextIndex]?.focus();
+           // setActiveInputIndex(nextIndex);
+        } else if (nextVal.length === 1 && parseInt(nextVal, 10) > 9 && currentIndex < 4) {
+            // If a single digit > 9 is entered (e.g., user types '9' in an empty field), move to next field
+            const nextIndex = currentIndex + 1;
+            inputRefs.current[nextIndex]?.focus();
+            setActiveInputIndex(nextIndex);
         }
-    } else {
-      const currentVal = newNumbers[activeInputIndex];
-      // Append or replace based on length
-       if (currentVal.length < 2) {
-           newNumbers[activeInputIndex] = currentVal + value;
-           form.setValue('numbers', newNumbers, { shouldValidate: true });
-           // Move to next input if 2 digits are entered
-           if (newNumbers[activeInputIndex].length === 2 && activeInputIndex < 4) {
-               setActiveInputIndex(activeInputIndex + 1);
-           } else if (newNumbers[activeInputIndex].length === 2 && activeInputIndex === 4) {
-               // Optionally close keypad or focus submit button
-              // setActiveInputIndex(null);
-           }
-       } else {
-            // If field already has 2 digits, move to next and insert
-            if(activeInputIndex < 4) {
-                newNumbers[activeInputIndex + 1] = value;
-                form.setValue('numbers', newNumbers, { shouldValidate: true });
-                setActiveInputIndex(activeInputIndex + 1);
-            }
-        }
+
+      } else if (currentVal.length < 2 && currentIndex < 4) {
+          // If current input has 1 digit, and user types another, but nextVal > 2 digits (shouldn't happen with validation)
+          // Move to next input and place the new digit there
+          const nextIndex = currentIndex + 1;
+          newNumbers[nextIndex] = value; // Place the single new digit here
+          form.setValue('numbers', newNumbers, { shouldValidate: true });
+          inputRefs.current[nextIndex]?.focus();
+          setActiveInputIndex(nextIndex);
+      }
     }
   };
 
@@ -133,6 +203,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
                     "w-full justify-start text-left font-normal",
                     !field.value && "text-muted-foreground"
                   )}
+                  onClick={() => setIsCalendarOpen(true)} // Explicitly open on button click
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {field.value ? format(field.value, "PPP", { locale: fr }) : <span>Choisir une date</span>}
@@ -143,11 +214,14 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
                   mode="single"
                   selected={field.value}
                   onSelect={(date) => {
-                    field.onChange(date); // Update form value
-                    setIsCalendarOpen(false); // Close popover on select
+                    if (date) { // Only update if a date is selected
+                        field.onChange(date); // Update form value
+                        setIsCalendarOpen(false); // Close popover on select
+                    }
                   }}
                   initialFocus
                   locale={fr} // Use French locale for calendar
+                  disabled={(date) => date > new Date()} // Disable future dates
                 />
               </PopoverContent>
             </Popover>
@@ -166,27 +240,63 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
               key={index}
               name={`numbers.${index}`}
               control={form.control}
-              render={({ field }) => (
+              render={({ field, fieldState }) => (
                 <Input
                   {...field}
-                  type="text" // Use text to allow manual and keypad input
-                  inputMode="numeric" // Hint for mobile keyboards (though we use custom)
+                   ref={(el) => {
+                      inputRefs.current[index] = el;
+                      // Forward the ref from Controller if needed, though typically not necessary here
+                      // if (typeof field.ref === 'function') field.ref(el);
+                      // else field.ref = el;
+                    }}
+                  type="text" // Use text to allow controlled input
+                  inputMode="numeric" // Hint for mobile keyboards
+                  pattern="[0-9]*" // Allow only numbers visually
                   maxLength={2}
                   placeholder="--"
-                  className="text-center text-lg font-semibold h-14 rounded-full border-2 focus:border-accent focus:ring-accent shadow-inner appearance-none" // Style as circles
+                  className={cn(
+                    "text-center text-lg font-semibold h-14 rounded-full border-2 focus:border-accent focus:ring-accent shadow-inner appearance-none", // Style as circles
+                    fieldState.error ? "border-destructive focus:border-destructive focus:ring-destructive" : ""
+                  )}
                   onFocus={() => setActiveInputIndex(index)}
-                  // Prevent manual typing if desired, rely only on keypad
+                  // Prevent manual typing if relying solely on keypad
                   // readOnly
+                  // Handle manual input changes if not readOnly
+                   onChange={(e) => {
+                       // Basic filtering for manual input if allowed
+                       const value = e.target.value.replace(/[^0-9]/g, ''); // Remove non-digits
+                       field.onChange(value); // Update form state
+                       // Basic auto-tabbing for manual input
+                       if (value.length === 2 && index < 4) {
+                            inputRefs.current[index + 1]?.focus();
+                            setActiveInputIndex(index + 1);
+                       }
+                   }}
+                    onKeyDown={(e) => {
+                       // Handle Backspace for manual input if allowed
+                       if (e.key === 'Backspace' && field.value === '' && index > 0) {
+                            e.preventDefault(); // Prevent default backspace behavior
+                            inputRefs.current[index - 1]?.focus();
+                            setActiveInputIndex(index - 1);
+                           // Optionally delete the last char of the previous input
+                            const prevValue = form.getValues(`numbers.${index - 1}`);
+                            form.setValue(`numbers.${index - 1}`, prevValue.slice(0, -1), { shouldValidate: true });
+                       }
+                   }}
                 />
               )}
             />
           ))}
         </div>
-         {form.formState.errors.numbers && (
-          <p className="text-sm text-destructive">
-            {form.formState.errors.numbers.message || form.formState.errors.numbers.root?.message}
-          </p>
-        )}
+         {(form.formState.errors.numbers?.message || form.formState.errors.numbers?.root?.message) && (
+            <p className="text-sm text-destructive">
+              {form.formState.errors.numbers.message || form.formState.errors.numbers.root?.message}
+            </p>
+          )}
+           {/* Show individual field errors if needed */}
+            {form.formState.errors.numbers?.map((error, index) => error && (
+                <p key={index} className="text-sm text-destructive">Numéro {index + 1}: {error.message}</p>
+            ))}
       </div>
 
       {/* Conditionally render Numeric Keypad */}
@@ -197,11 +307,10 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
        )}
 
 
-      <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+      <Button type="submit" className="w-full" disabled={form.formState.isSubmitting || !form.formState.isValid}>
         <PlusCircle className="mr-2 h-4 w-4" />
         {form.formState.isSubmitting ? 'Enregistrement...' : 'Enregistrer le Tirage'}
       </Button>
     </form>
   );
 }
-

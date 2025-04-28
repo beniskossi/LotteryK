@@ -17,7 +17,7 @@ import { Calendar as CalendarIcon, PlusCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useToast } from '@/hooks/use-toast';
 import NumericKeypad from '@/components/numeric-keypad';
-import { useState, useRef } from 'react'; // Import useRef
+import { useState, useRef, useEffect } from 'react'; // Import useRef and useEffect
 
 
 interface DrawEntryFormProps {
@@ -73,6 +73,15 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
      mode: 'onChange', // Validate on change to give feedback
    });
 
+   // Focus the first input on component mount
+    useEffect(() => {
+        if (inputRefs.current[0]) {
+            inputRefs.current[0].focus();
+            setActiveInputIndex(0);
+        }
+    }, []); // Empty dependency array ensures this runs only once on mount
+
+
   const onSubmit = (data: DrawFormData) => {
     // Additional check just before submission, although schema should handle it
      const filledNumbers = data.numbers.map(n => n.trim()).filter(n => n !== '');
@@ -115,13 +124,16 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
       if (currentVal.length > 0) {
         // Delete the last digit of the current input
         newNumbers[currentIndex] = currentVal.slice(0, -1);
-        form.setValue('numbers', newNumbers, { shouldValidate: true });
+        form.setValue(`numbers.${currentIndex}`, newNumbers[currentIndex], { shouldValidate: true });
         inputRefs.current[currentIndex]?.focus(); // Keep focus
       } else if (currentIndex > 0) {
         // Current input is empty, move focus to the previous input and delete its last digit
         const prevIndex = currentIndex - 1;
-        newNumbers[prevIndex] = newNumbers[prevIndex].slice(0, -1);
-        form.setValue('numbers', newNumbers, { shouldValidate: true });
+        // Check if prevIndex has content before deleting
+        if (newNumbers[prevIndex].length > 0) {
+            newNumbers[prevIndex] = newNumbers[prevIndex].slice(0, -1);
+            form.setValue(`numbers.${prevIndex}`, newNumbers[prevIndex], { shouldValidate: true });
+        }
         inputRefs.current[prevIndex]?.focus(); // Focus previous input
         setActiveInputIndex(prevIndex); // Update active index for keypad
       }
@@ -142,6 +154,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
                 title: "Invalide",
                 description: "Le numéro doit être entre 1 et 90.",
                 variant: "destructive",
+                duration: 2000, // Short duration for validation feedback
              });
              return; // Stop processing this input
          }
@@ -151,36 +164,32 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
       // Only allow up to 2 digits
       if (nextVal.length <= 2) {
         newNumbers[currentIndex] = nextVal;
-        form.setValue('numbers', newNumbers, { shouldValidate: true });
+        form.setValue(`numbers.${currentIndex}`, nextVal, { shouldValidate: true });
 
-        // Move to the next input if 2 digits are entered or if '0' was handled
-        if (nextVal.length === 2 && currentIndex < 4) {
-          const nextIndex = currentIndex + 1;
-          inputRefs.current[nextIndex]?.focus();
-          setActiveInputIndex(nextIndex);
-        } else if (nextVal.length === 2 && currentIndex === 4) {
-            // Last input filled, optionally close keypad or focus submit
-            setActiveInputIndex(null); // Hide keypad
-        } else if (nextVal.length === 1 && currentIndex < 4 && parseInt(nextVal, 10) >= 10) {
-            // This case shouldn't happen with the validation above, but as fallback:
-            // If a single digit makes it >= 10 (e.g. user typed '9' then '1'), move next
-           // const nextIndex = currentIndex + 1;
-           // inputRefs.current[nextIndex]?.focus();
-           // setActiveInputIndex(nextIndex);
-        } else if (nextVal.length === 1 && parseInt(nextVal, 10) > 9 && currentIndex < 4) {
-            // If a single digit > 9 is entered (e.g., user types '9' in an empty field), move to next field
-            const nextIndex = currentIndex + 1;
-            inputRefs.current[nextIndex]?.focus();
-            setActiveInputIndex(nextIndex);
+        // Move to the next input if 2 digits are entered OR if the number is >= 10
+        const num = parseInt(nextVal, 10);
+        if (nextVal.length === 2 || (!isNaN(num) && num >= 10 && num <=90)) {
+            if (currentIndex < 4) {
+                const nextIndex = currentIndex + 1;
+                requestAnimationFrame(() => { // Use rAF to ensure state update before focus
+                    inputRefs.current[nextIndex]?.focus();
+                });
+                setActiveInputIndex(nextIndex);
+            } else {
+                 // Last input filled, optionally close keypad or focus submit
+                setActiveInputIndex(null); // Hide keypad (optional)
+                // Consider focusing the submit button: submitButtonRef.current?.focus();
+            }
         }
-
       } else if (currentVal.length < 2 && currentIndex < 4) {
           // If current input has 1 digit, and user types another, but nextVal > 2 digits (shouldn't happen with validation)
           // Move to next input and place the new digit there
           const nextIndex = currentIndex + 1;
           newNumbers[nextIndex] = value; // Place the single new digit here
-          form.setValue('numbers', newNumbers, { shouldValidate: true });
-          inputRefs.current[nextIndex]?.focus();
+          form.setValue(`numbers.${nextIndex}`, value, { shouldValidate: true });
+          requestAnimationFrame(() => {
+              inputRefs.current[nextIndex]?.focus();
+           });
           setActiveInputIndex(nextIndex);
       }
     }
@@ -293,10 +302,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
               {form.formState.errors.numbers.message || form.formState.errors.numbers.root?.message}
             </p>
           )}
-           {/* Show individual field errors if needed */}
-            {form.formState.errors.numbers?.map((error, index) => error && (
-                <p key={index} className="text-sm text-destructive">Numéro {index + 1}: {error.message}</p>
-            ))}
+
       </div>
 
       {/* Conditionally render Numeric Keypad */}

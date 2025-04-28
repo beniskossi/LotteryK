@@ -2,7 +2,7 @@
 
 import type { LotteryCategory, LotteryDraw } from '@/types/lottery';
 import { useLotteryData } from '@/hooks/useLotteryData';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, use } from 'react'; // Added use
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -15,14 +15,15 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type * as ReactType from 'react'; // Import React types
 
 interface ConsultPageProps {
-  params: { category: string };
+  params: Promise<{ category: string }>; // params is a Promise
 }
 
 type TimePeriod = 'all' | 'last_month' | 'last_quarter' | 'last_year';
 
-export default function ConsultPage({ params: { category: categoryParam } }: ConsultPageProps) {
-  // Destructure category from params in the function signature
-  const category = categoryParam as LotteryCategory;
+export default function ConsultPage({ params }: ConsultPageProps) {
+  // Unwrap the params Promise using React.use()
+  const resolvedParams = use(params);
+  const category = resolvedParams.category as LotteryCategory;
   const { draws, loading } = useLotteryData(category);
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');

@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { LotteryCategory, LotteryDraw } from '@/types/lottery';
@@ -49,6 +50,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
   const { addDraw } = useLotteryData(category);
   const { toast } = useToast();
   const [activeInputIndex, setActiveInputIndex] = useState<number | null>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false); // State for Calendar Popover
 
    const form = useForm<DrawFormData>({
      resolver: zodResolver(DrawSchema),
@@ -71,6 +73,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
     });
     form.reset({ date: new Date(), numbers: Array(5).fill('') }); // Reset form after submission
     setActiveInputIndex(null); // Close keypad
+    setIsCalendarOpen(false); // Ensure calendar is closed on submit
   };
 
   const handleNumberInput = (value: string) => {
@@ -122,7 +125,7 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
           name="date"
           control={form.control}
           render={({ field }) => (
-             <Popover>
+             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}> {/* Control Popover state */}
               <PopoverTrigger asChild>
                 <Button
                   variant={"outline"}
@@ -139,7 +142,10 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
                 <Calendar
                   mode="single"
                   selected={field.value}
-                  onSelect={field.onChange}
+                  onSelect={(date) => {
+                    field.onChange(date); // Update form value
+                    setIsCalendarOpen(false); // Close popover on select
+                  }}
                   initialFocus
                   locale={fr} // Use French locale for calendar
                 />
@@ -198,3 +204,4 @@ export default function DrawEntryForm({ category }: DrawEntryFormProps) {
     </form>
   );
 }
+

@@ -17,8 +17,9 @@ interface PredictionPageProps {
   params: { category: string };
 }
 
-export default function PredictionPage({ params }: PredictionPageProps) {
-  const category = params.category as LotteryCategory;
+export default function PredictionPage({ params: { category: categoryParam } }: PredictionPageProps) {
+  // Destructure category from params in the function signature
+  const category = categoryParam as LotteryCategory;
   const { draws, loading: dataLoading } = useLotteryData(category);
   // Update state type to use AlgorithmOutput
   const [prediction, setPrediction] = useState<AlgorithmOutput | null>(null);

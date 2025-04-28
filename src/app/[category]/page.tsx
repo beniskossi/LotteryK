@@ -7,8 +7,9 @@ interface EntriesPageProps {
   params: { category: string };
 }
 
-export default function EntriesPage({ params }: EntriesPageProps) {
-  const category = params.category as LotteryCategory;
+export default function EntriesPage({ params: { category: categoryParam } }: EntriesPageProps) {
+   // Destructure category from params in the function signature
+  const category = categoryParam as LotteryCategory;
 
   return (
     <div className="space-y-6">

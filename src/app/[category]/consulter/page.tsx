@@ -12,6 +12,7 @@ import { getBallColorClass } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import type * as ReactType from 'react'; // Import React types
 
 interface ConsultPageProps {
   params: { category: string };
@@ -19,14 +20,15 @@ interface ConsultPageProps {
 
 type TimePeriod = 'all' | 'last_month' | 'last_quarter' | 'last_year';
 
-export default function ConsultPage({ params }: ConsultPageProps) {
-  const category = params.category as LotteryCategory;
+export default function ConsultPage({ params: { category: categoryParam } }: ConsultPageProps) {
+  // Destructure category from params in the function signature
+  const category = categoryParam as LotteryCategory;
   const { draws, loading } = useLotteryData(category);
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
   const [inputError, setInputError] = useState<string | null>(null);
 
-  const handleNumberChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleNumberChange = (event: ReactType.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     if (value === '') {
       setSelectedNumber(null);

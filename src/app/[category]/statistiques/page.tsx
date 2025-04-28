@@ -2,7 +2,7 @@
 
 import type { LotteryCategory, LotteryDraw } from '@/types/lottery';
 import { useLotteryData } from '@/hooks/useLotteryData';
-import { useMemo } from 'react';
+import { useMemo, use } from 'react'; // Added use
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, PieChart } from 'lucide-react'; // Icons for charts
 import { Skeleton } from '@/components/ui/skeleton';
@@ -24,7 +24,7 @@ import type { ChartConfig } from "@/components/ui/chart"
 
 
 interface StatisticsPageProps {
-  params: { category: string };
+    params: Promise<{ category: string }>; // params is a Promise
 }
 
 const COLORS = [
@@ -37,7 +37,9 @@ const COLORS = [
 
 
 export default function StatisticsPage({ params }: StatisticsPageProps) {
-  const category = params.category as LotteryCategory;
+  // Unwrap the params Promise using React.use()
+  const resolvedParams = use(params);
+  const category = resolvedParams.category as LotteryCategory;
   const { draws, loading } = useLotteryData(category);
 
   const statistics = useMemo(() => {

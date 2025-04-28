@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Delete } from 'lucide-react';
+import { cn } from '@/lib/utils'; // Import cn utility function
 
 interface NumericKeypadProps {
   onInput: (value: string) => void;

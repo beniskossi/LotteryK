@@ -2,7 +2,7 @@
 
 import type { LotteryCategory, HistoricalDataPoint } from '@/types/lottery';
 import { useLotteryData } from '@/hooks/useLotteryData';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, use } from 'react'; // Added use
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BrainCircuit, Loader2 } from 'lucide-react';
@@ -14,12 +14,14 @@ import { Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface PredictionPageProps {
-  params: { category: string };
+  // params is now a Promise
+  params: Promise<{ category: string }>;
 }
 
-export default function PredictionPage({ params: { category: categoryParam } }: PredictionPageProps) {
-  // Destructure category from params in the function signature
-  const category = categoryParam as LotteryCategory;
+export default function PredictionPage({ params }: PredictionPageProps) {
+  // Unwrap the params Promise using React.use()
+  const resolvedParams = use(params);
+  const category = resolvedParams.category as LotteryCategory;
   const { draws, loading: dataLoading } = useLotteryData(category);
   // Update state type to use AlgorithmOutput
   const [prediction, setPrediction] = useState<AlgorithmOutput | null>(null);
